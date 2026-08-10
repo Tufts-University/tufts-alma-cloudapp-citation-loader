@@ -1,0 +1,9 @@
+{
+   "target": "https://tufts-psb.alma.exlibrisgroup.com",
+   "title": "Citation Loader",
+   "subtitle": "A tool to parse citations and retrieve Alma holdings information for Leganto reading list items",
+   "author": "Henry Steele, Library Technology Faculty Information Services, Tufts Technology Services, Tufts University",
+   "env": "https://tufts-psb.alma.exlibrisgroup.com/institution/01TUN_INST",
+   "port": 4200,
+   "name": "citation-loader"
+}
