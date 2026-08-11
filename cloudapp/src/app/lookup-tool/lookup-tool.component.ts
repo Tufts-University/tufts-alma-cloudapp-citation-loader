@@ -138,6 +138,8 @@ export class LookupToolComponent implements OnInit {
         } as any
       );
 
+      console.log('Parsed citations from block:', parsed);
+
       this.parsedCitations.push(...parsed);
     });
 

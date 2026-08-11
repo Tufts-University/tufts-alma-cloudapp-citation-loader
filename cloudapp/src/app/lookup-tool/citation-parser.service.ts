@@ -4,19 +4,109 @@ import {
   ParsedCreator,
   ParsedCitationType
 } from '../models/parsed-citation.model';
-
+import { CitationSnifferService } from './citation-sniffer.service'
 @Injectable({
   providedIn: 'root'
 })
 export class CitationParserService {
-  parseBlock(text: string, context: Partial<ParsedCitation>): ParsedCitation[] {
-    const entries = this.splitEntries(text);
 
-    return entries
-      .filter(entry => !this.isLikelyCallNumber(entry))
-      .map(entry => this.parseEntry(entry, context))
-      .filter(entry => !!entry.title || !!entry.creators.length || !!entry.year);
-  }
+    constructor(
+      private citationSnifferService: CitationSnifferService
+
+    ){}
+    parseBlock(
+      text: string,
+      context: Partial<ParsedCitation>
+    ): ParsedCitation[] {
+
+      const entries = this.splitEntries(text);
+      const results: ParsedCitation[] = [];
+
+      for (const entry of entries) {
+        if (this.isLikelyCallNumber(entry)) {
+          continue;
+        }
+
+        try {
+          const parsed = this.parseEntry(entry, context);
+
+          if (
+            !parsed.title &&
+            !parsed.creators.length &&
+            !parsed.year
+          ) {
+            console.error(
+              'Citation could not be parsed:',
+              entry,
+              parsed.parseWarnings
+            );
+          }
+
+          // IMPORTANT:
+          // Still retain the result so it gets exported.
+          results.push(parsed);
+
+        } catch (error) {
+          console.error(
+            'Citation parser exception:',
+            entry,
+            error
+          );
+
+          // Add an error row rather than aborting the entire batch.
+          results.push(
+            this.createFailedCitation(entry, context, error)
+          );
+        }
+      }
+
+      return results;
+    }
+    private createFailedCitation(
+      raw: string,
+      context: Partial<ParsedCitation>,
+      error: unknown
+    ): ParsedCitation {
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      return {
+        raw,
+        type: 'unknown',
+        title: '',
+        containerTitle: '',
+        publisher: '',
+        publicationPlace: '',
+        year: '',
+        volume: '',
+        issue: '',
+        pages: '',
+        edition: '',
+        doi: '',
+        isbn: '',
+        issn: '',
+        url: '',
+        creators: [],
+
+        parseWarnings: [
+          `Citation parser error: ${message}`
+        ],
+
+        confidence: null,
+
+        courseName: context.courseName || '',
+        instructor: context.instructor || '',
+        courseNumber: context.courseNumber || '',
+        courseSemester: context.courseSemester || '',
+        courseTermForMapping:
+          context.courseTermForMapping || '',
+        courseYearForMapping:
+          context.courseYearForMapping || ''
+      };
+    }
 
   splitEntries(text: string): string[] {
     const normalized = (text || '').replace(/\r\n/g, '\n').trim();
@@ -43,15 +133,52 @@ export class CitationParserService {
   }
 
   parseEntry(raw: string, context: Partial<ParsedCitation>): ParsedCitation {
+    //console.log(raw)
+    let format = this.citationSnifferService.determineCitationFormat(raw)
+      //   block.citationsText,
+      //   {
+      //     courseName: block.courseName,
+      //     instructor: block.instructorLastName,
+      //     courseNumber: block.courseNumber,
+      //     courseSemester: block.courseSemester,
+      //     courseYear: block.courseYear,
+      //     courseTermForMapping: block.courseTermForMapping,
+      //     courseYearForMapping: block.courseYearForMapping
+      //   } as any
+      // );
+    
+
     const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+ 
+    const year = this.extractYear(cleaned, format);
     const creators = this.extractCreators(cleaned);
-    const year = this.extractYear(cleaned);
-    const title = this.extractTitle(cleaned, creators, year);
+    const title = this.extractTitle(cleaned, format);
     const containerTitle = this.extractContainerTitle(cleaned, title);
     const publisher = this.extractPublisher(cleaned, title, containerTitle);
     const publicationPlace = this.extractPublicationPlace(cleaned);
     const type = this.inferType(cleaned, title, containerTitle);
 
+    console.log('Parsed creators:', creators);
+    // console.log('Parsed title:', title);
+    // console.log('Parsed container title:', containerTitle);
+    // console.log('Parsed publisher:', publisher);
+    // console.log('Parsed publication place:', publicationPlace);
+    // console.log('Parsed year:', year);
+    // console.log('volume:', this.extractVolume(cleaned));
+    // console.log('issue:', this.extractIssue(cleaned));
+    // console.log('pages:', this.extractPages(cleaned));
+    // console.log('doi:', this.extractDoi(cleaned));
+    // console.log('isbn:', this.extractIsbn(cleaned));
+    // console.log('issn:', this.extractIssn(cleaned));
+    // console.log('url:', this.extractUrl(cleaned));
+    // console.log('parseWarnings:', this.buildWarnings(cleaned, creators, title, year));
+    // console.log('confidence:', null);
+    // console.log('courseName:', context.courseName || '');
+    // console.log('instructor:', context.instructor || '');
+    // console.log('courseNumber:', context.courseNumber || '');
+    // console.log('courseSemester:', context.courseSemester || '');
+    // console.log('courseTermForMapping:', context.courseTermForMapping || '');
+    // console.log('courseYearForMapping:', context.courseYearForMapping || '');
     return {
       raw,
       type,
@@ -206,13 +333,23 @@ export class CitationParserService {
     });
   }
 
-  private splitBookListPrefix(raw: string): { creatorPart: string; titlePart: string } {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+  private splitBookListPrefix(
+    raw: string
+  ): { creatorPart: string; titlePart: string } {
+
+    const cleaned = this.stripTrailingCallNumber(
+      this.cleanWhitespace(raw)
+    );
+
     const pubBlock = this.getPublicationBlock(cleaned);
     const prefix = pubBlock ? pubBlock.prefix : cleaned;
 
-    // Case: "... , eds., Title"
-    const roleSplit = prefix.match(/^(.*?\b(?:eds?\.?|trans\.?|dir\.?)\b\.?),\s*(.+)$/i);
+    // Explicit editor/translator/director marker gives us
+    // an excellent boundary between creators and title.
+    const roleSplit = prefix.match(
+      /^(.*?(?:\((?:eds?\.?|trans\.?|dir\.?)\)|\b(?:eds?\.?|trans\.?|dir\.?)\b))\s*,\s*(.+)$/i
+    );
+
     if (roleSplit) {
       return {
         creatorPart: roleSplit[1].trim(),
@@ -220,13 +357,40 @@ export class CitationParserService {
       };
     }
 
-    // Split on the first comma for book-list style:
-    // "August Reinisch, Advanced Introduction ..."
-    const idx = prefix.indexOf(',');
-    if (idx >= 0) {
+    /*
+    * General author-list form.
+    *
+    * Examples:
+    *
+    * August Reinisch, Advanced Introduction...
+    *
+    * Jonathan Bonnitcha, Lauge N. Skovgaard Poulsen,
+    * and Michael Waibel, The Political Economy...
+    *
+    * We find the comma that terminates the creator list,
+    * rather than blindly using the first comma.
+    */
+
+    const andAuthorMatch = prefix.match(
+      /^(.*?\band\s+[A-Z][^,]+),\s+(.+)$/u
+    );
+
+    if (andAuthorMatch) {
       return {
-        creatorPart: prefix.slice(0, idx).trim(),
-        titlePart: prefix.slice(idx + 1).trim()
+        creatorPart: andAuthorMatch[1].trim(),
+        titlePart: andAuthorMatch[2].trim()
+      };
+    }
+
+    // Single-author form.
+    const singleAuthorMatch = prefix.match(
+      /^([^,]+),\s+(.+)$/u
+    );
+
+    if (singleAuthorMatch) {
+      return {
+        creatorPart: singleAuthorMatch[1].trim(),
+        titlePart: singleAuthorMatch[2].trim()
       };
     }
 
@@ -236,96 +400,108 @@ export class CitationParserService {
     };
   }
 
-  private extractYear(raw: string): string {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+  private extractYear(raw: string, format: string): string {
+    const cleaned = this.stripTrailingCallNumber(
+      this.cleanWhitespace(raw)
+    );
 
-    const parenSplit = this.splitAuthorYearParenCitation(cleaned);
-    if (parenSplit) {
-      return parenSplit.year;
-    }
-
-    const authorDateSplit = this.splitAuthorDateCitation(cleaned);
-    if (authorDateSplit) {
-      return authorDateSplit.year;
-    }
-
+    // Book-list style:
+    // (Elgar 2020)
+    // (Oxford University Press 2015)
+    // (2nd ed., Juris 2007)
     const pubBlock = this.getPublicationBlock(cleaned);
+
     if (pubBlock) {
-      const pubYear = pubBlock.parenContent.match(/\b([1-2]\d{3})\b/u);
-      if (pubYear) {
-        return pubYear[1];
+      const match = pubBlock.parenContent.match(/\b([12]\d{3})\b/);
+
+      if (match) {
+        return match[1];
       }
     }
 
-    const match = cleaned.match(/\b([1-2]\d{3})\b/u);
-    return match ? match[1] : '';
+    let match: RegExpMatchArray | null = null;
+
+    if (format === 'MLA or Chicago') {
+      match = cleaned.match(/\b([12]\d{3})\b\.?\s*$/);
+
+      if (match) {
+        return match[1];
+      }
+    }
+
+    if (format === 'APA or Harvard') {
+      match = cleaned.match(/\(([12]\d{3})\)/);
+
+      if (match) {
+        return match[1];
+      }
+    }
+
+    // Generic fallback.
+    const years = cleaned.match(/\b[12]\d{3}\b/g);
+
+    return years && years.length
+      ? years[years.length - 1]
+      : '';
   }
 
   private extractCreators(raw: string): ParsedCreator[] {
     const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
 
-    const parenSplit = this.splitAuthorYearParenCitation(cleaned);
-    if (parenSplit) {
-      return this.parseCreatorString(parenSplit.creatorPart, 'author');
-    }
-
-    const authorDateSplit = this.splitAuthorDateCitation(cleaned);
-    if (authorDateSplit) {
-      return this.parseCreatorString(authorDateSplit.creatorPart, 'author');
-    }
-
+    // Book-list style:
+    // August Reinisch, Advanced Introduction ... (Elgar 2020).
+    // George A. Bermann (ed.), Recognition ... (Springer 2017).
     const bookSplit = this.splitBookListPrefix(cleaned);
 
-    let role: ParsedCreator['role'] = 'author';
-    if (/\b(?:eds?\.?|edited by)\b/i.test(bookSplit.creatorPart) || /\((?:eds?\.?)\)/i.test(bookSplit.creatorPart)) {
-      role = 'editor';
-    } else if (/\b(?:trans\.?|translated by)\b/i.test(bookSplit.creatorPart)) {
-      role = 'translator';
-    } else if (/\b(?:dir\.?|directed by)\b/i.test(bookSplit.creatorPart)) {
-      role = 'director';
-    }
+    if (bookSplit.creatorPart) {
+      let creatorText = bookSplit.creatorPart;
+      let role: ParsedCreator['role'] = 'author';
 
-    return this.parseCreatorString(bookSplit.creatorPart, role);
-  }
-
-  private extractTitle(raw: string, _creators: ParsedCreator[], _year: string): string {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
-
-    const parenSplit = this.splitAuthorYearParenCitation(cleaned);
-    if (parenSplit) {
-      return parenSplit.rest
-        .replace(/,\s*chs?\b.*$/i, '')
-        .replace(/,\s*\(pp[,.\s0-9\-–]+\)\.?$/i, '')
-        .replace(/\s*\(pp[,.\s0-9\-–]+\)\.?$/i, '')
-        .replace(/\.$/, '')
-        .trim();
-    }
-
-    const authorDateSplit = this.splitAuthorDateCitation(cleaned);
-    if (authorDateSplit) {
-      // For Chicago author-date book citations:
-      // Title. Place: Publisher.
-      const rest = authorDateSplit.rest;
-
-      const match = rest.match(/^(.*?)(?:\.\s+[^.:]+:\s+.+)?\.?$/u);
-      if (match && match[1]) {
-        return match[1].trim().replace(/\.$/, '');
+      if (/\((?:eds?\.?)\)|\b(?:eds?\.?|edited by)\b/i.test(creatorText)) {
+        role = 'editor';
+      } else if (/\((?:trans\.?)\)|\b(?:trans\.?|translated by)\b/i.test(creatorText)) {
+        role = 'translator';
+      } else if (/\((?:dir\.?)\)|\b(?:dir\.?|directed by)\b/i.test(creatorText)) {
+        role = 'director';
       }
 
-      return rest.replace(/\.$/, '').trim();
+      return this.parseCreatorString(creatorText, role);
     }
 
-    const bookSplit = this.splitBookListPrefix(cleaned);
-    let title = bookSplit.titlePart || '';
+    // Normal period-delimited citation fallback.
+    const creatorMatch = cleaned.match(/^(.+?)\./);
+    const creatorText = creatorMatch?.[1] || '';
 
-    title = title
-      .replace(/^\(?\b(?:eds?\.?|trans\.?|dir\.?)\b\)?\.?,?\s*/i, '')
-      .replace(/^["“]/, '')
-      .replace(/["”]$/, '')
-      .replace(/\.$/, '')
-      .trim();
+    return this.parseCreatorString(creatorText, 'author');
+  }
 
-    return title;
+  private extractTitle(raw: string, format: string): string {
+    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+
+    // Book-list citations with publication information in parentheses.
+    const pubBlock = this.getPublicationBlock(cleaned);
+
+    if (pubBlock) {
+      const bookSplit = this.splitBookListPrefix(cleaned);
+
+      if (bookSplit.titlePart) {
+        return bookSplit.titlePart
+          .replace(/[.,]\s*$/, '')
+          .trim();
+      }
+    }
+
+    let title = '';
+
+    if (format === 'APA or Harvard') {
+      title =
+        (cleaned.match(/^[^.]+?\.\s*\(\d{4}\)\.?\s*(.+?)\./) || [])[1] || '';
+    } else {
+      title =
+        (cleaned.match(/^.+?\.\s*(.+?)\./) || [])[1] || '';
+    }
+
+    return title.trim().replace(/\.$/, '');
   }
 
   private extractContainerTitle(raw: string, title: string): string {

@@ -32,6 +32,25 @@ export interface CitationInputRow {
 })
 export class CitationSnifferService {
 
+  determineCitationFormat(text: string): string {
+    const normalized = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\u00A0/g, ' ')
+      .trim();
+    let format = ""
+    if (/^.+?\d{4}\.?\s*/.test(text)) {
+      format = "MLA or Chicago";
+      
+    }
+
+    else{
+      format = "APA or Harvard";
+    }
+
+    
+    return format;
+  }
+
   parseCitationsBlock(text: string, context: CitationSniffContext): CitationInputRow[] {
     const citations = this.splitReferences(text);
 
