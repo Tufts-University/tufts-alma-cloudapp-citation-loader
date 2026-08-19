@@ -498,7 +498,7 @@ export class CitationParserService {
         (cleaned.match(/^[^.]+?\.\s*\(\d{4}\)\.?\s*(.+?)\./) || [])[1] || '';
     } else {
       title =
-        (cleaned.match(/^.+?\.\s*(.+?)\./) || [])[1] || '';
+        (cleaned.match(/^[^.]+?\.\s*\(?\d{4}\)?\.?\s*([^.]+)/) || [])[1] || '';
     }
 
     return title.trim().replace(/\.$/, '');
