@@ -37,18 +37,42 @@ export class CitationSnifferService {
       .replace(/\r\n/g, '\n')
       .replace(/\u00A0/g, ' ')
       .trim();
-    let format = ""
-    if (/^.+?\d{4}\.?\s*/.test(text)) {
-      format = "MLA or Chicago";
-      
+
+    // APA:
+    // Dillard, A. (2007). The writing life. HarperCollins e-books.
+    if (
+      /^[^,]+,\s*(?:[A-Z]\.\s*)+\(\d{4}\)\.\s+/.test(normalized)
+    ) {
+      return 'APA';
     }
 
-    else{
-      format = "APA or Harvard";
+    // Harvard:
+    // Dillard, A. (2007) The Writing Life. Pymble, NSW: HarperCollins e-books.
+    if (
+      /^[^,]+,\s*(?:[A-Z]\.\s*)+\(\d{4}\)\s+/.test(normalized)
+    ) {
+      return 'Harvard';
     }
 
-    
-    return format;
+    // Chicago Author-Date:
+    // Dillard, Annie. 2007. The Writing Life. Pymble, NSW: HarperCollins e-books.
+    if (
+      /^[^,]+,\s*.+?\.\s+\d{4}\.\s+/.test(normalized)
+    ) {
+      return 'Chicago';
+    }
+
+    // MLA:
+    // Dillard, Annie. The Writing Life. HarperCollins e-books, 2007.
+    //
+    // Year is near the END rather than immediately after the author.
+    if (
+      /^[^,]+,\s*.+?\.\s+.+,\s+\d{4}\.?$/.test(normalized)
+    ) {
+      return 'MLA';
+    }
+
+    return 'Unknown';
   }
 
   parseCitationsBlock(text: string, context: CitationSniffContext): CitationInputRow[] {

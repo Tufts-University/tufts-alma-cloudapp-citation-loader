@@ -151,13 +151,20 @@ export class CitationParserService {
     const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
  
     const year = this.extractYear(cleaned, format);
-    const creators = this.extractCreators(cleaned);
+    const creators = this.extractCreators(cleaned, format);
     const title = this.extractTitle(cleaned, format);
     const containerTitle = this.extractContainerTitle(cleaned, title);
-    const publisher = this.extractPublisher(cleaned, title, containerTitle);
-    const publicationPlace = this.extractPublicationPlace(cleaned);
+    const publisher = this.extractPublisher(
+      cleaned,
+      title,
+      containerTitle,
+      format
+    );
+    const publicationPlace = this.extractPublicationPlace(
+      cleaned,
+      format
+    );
     const type = this.inferType(cleaned, title, containerTitle);
-
     console.log('Parsed creators:', creators);
     // console.log('Parsed title:', title);
     // console.log('Parsed container title:', containerTitle);
@@ -405,10 +412,8 @@ export class CitationParserService {
       this.cleanWhitespace(raw)
     );
 
-    // Book-list style:
-    // (Elgar 2020)
-    // (Oxford University Press 2015)
-    // (2nd ed., Juris 2007)
+    // Preserve your existing legal/book-list citation handling:
+    // Title (Oxford University Press 2015).
     const pubBlock = this.getPublicationBlock(cleaned);
 
     if (pubBlock) {
@@ -421,16 +426,24 @@ export class CitationParserService {
 
     let match: RegExpMatchArray | null = null;
 
-    if (format === 'MLA or Chicago') {
-      match = cleaned.match(/\b([12]\d{3})\b\.?\s*$/);
+    if (format === 'APA' || format === 'Harvard') {
+      match = cleaned.match(/\(([12]\d{3})\)/);
 
       if (match) {
         return match[1];
       }
     }
 
-    if (format === 'APA or Harvard') {
-      match = cleaned.match(/\(([12]\d{3})\)/);
+    if (format === 'Chicago') {
+      match = cleaned.match(/\.\s+([12]\d{3})\.\s+/);
+
+      if (match) {
+        return match[1];
+      }
+    }
+
+    if (format === 'MLA') {
+      match = cleaned.match(/,\s*([12]\d{3})\.?\s*$/);
 
       if (match) {
         return match[1];
@@ -445,34 +458,121 @@ export class CitationParserService {
       : '';
   }
 
-  private extractCreators(raw: string): ParsedCreator[] {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+  private extractCreators(
+    raw: string,
+    format: string
+  ): ParsedCreator[] {
 
-    // Book-list style:
-    // August Reinisch, Advanced Introduction ... (Elgar 2020).
-    // George A. Bermann (ed.), Recognition ... (Springer 2017).
-    const bookSplit = this.splitBookListPrefix(cleaned);
+    const cleaned = this.stripTrailingCallNumber(
+      this.cleanWhitespace(raw)
+    );
 
-    if (bookSplit.creatorPart) {
-      let creatorText = bookSplit.creatorPart;
-      let role: ParsedCreator['role'] = 'author';
+    /*
+    * Your existing legal/book-list style:
+    *
+    * August Reinisch, Advanced Introduction...
+    *   (Elgar 2020).
+    *
+    * George A. Bermann (ed.), Recognition...
+    *   (Springer 2017).
+    */
+    const pubBlock = this.getPublicationBlock(cleaned);
 
-      if (/\((?:eds?\.?)\)|\b(?:eds?\.?|edited by)\b/i.test(creatorText)) {
-        role = 'editor';
-      } else if (/\((?:trans\.?)\)|\b(?:trans\.?|translated by)\b/i.test(creatorText)) {
-        role = 'translator';
-      } else if (/\((?:dir\.?)\)|\b(?:dir\.?|directed by)\b/i.test(creatorText)) {
-        role = 'director';
+    if (pubBlock) {
+      const bookSplit = this.splitBookListPrefix(cleaned);
+
+      if (bookSplit.creatorPart) {
+        let creatorText = bookSplit.creatorPart;
+        let role: ParsedCreator['role'] = 'author';
+
+        if (
+          /\((?:eds?\.?)\)|\b(?:eds?\.?|edited by)\b/i.test(
+            creatorText
+          )
+        ) {
+          role = 'editor';
+
+        } else if (
+          /\((?:trans\.?)\)|\b(?:trans\.?|translated by)\b/i.test(
+            creatorText
+          )
+        ) {
+          role = 'translator';
+
+        } else if (
+          /\((?:dir\.?)\)|\b(?:dir\.?|directed by)\b/i.test(
+            creatorText
+          )
+        ) {
+          role = 'director';
+        }
+
+        return this.parseCreatorString(
+          creatorText,
+          role
+        );
       }
-
-      return this.parseCreatorString(creatorText, role);
     }
 
-    // Normal period-delimited citation fallback.
-    const creatorMatch = cleaned.match(/^(.+?)\./);
+    /*
+    * Chicago:
+    *
+    * Dillard, Annie. 2007. The Writing Life.
+    */
+    if (format === 'Chicago') {
+      const split = this.splitAuthorDateCitation(cleaned);
+
+      if (split) {
+        return this.parseCreatorString(
+          split.creatorPart,
+          'author'
+        );
+      }
+    }
+
+    /*
+    * APA / Harvard:
+    *
+    * Dillard, A. (2007) ...
+    * Dillard, A. (2007). ...
+    */
+    if (format === 'APA' || format === 'Harvard') {
+      const split = this.splitAuthorYearParenCitation(cleaned);
+
+      if (split) {
+        return this.parseCreatorString(
+          split.creatorPart,
+          'author'
+        );
+      }
+    }
+
+    /*
+    * MLA:
+    *
+    * Dillard, Annie. The Writing Life...
+    */
+    if (format === 'MLA') {
+      const match = cleaned.match(
+        /^(.+?)\.\s+(?=\S)/u
+      );
+
+      if (match) {
+        return this.parseCreatorString(
+          match[1],
+          'author'
+        );
+      }
+    }
+
+    // Last-resort fallback.
+    const creatorMatch = cleaned.match(/^(.+?)\.\s+/);
     const creatorText = creatorMatch?.[1] || '';
 
-    return this.parseCreatorString(creatorText, 'author');
+    return this.parseCreatorString(
+      creatorText,
+      'author'
+    );
   }
 
   private extractTitle(raw: string, format: string): string {
@@ -536,58 +636,294 @@ export class CitationParserService {
     return '';
   }
 
-  private extractPublisher(raw: string, title: string, _containerTitle: string): string {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+  private extractPublisher(
+    raw: string,
+    title: string,
+    _containerTitle: string,
+    format: string
+  ): string {
 
-    // Parenthetical book-list publication block
+    const cleaned = this.stripTrailingCallNumber(
+      this.cleanWhitespace(raw)
+    );
+
+    /*
+    * Existing parenthetical book-list style:
+    *
+    * August Reinisch, Advanced Introduction...
+    *   (Elgar 2020).
+    *
+    * Title (Oxford University Press 2015).
+    *
+    * Title (New York: Routledge, 2018).
+    */
     const pubBlock = this.getPublicationBlock(cleaned);
+
     if (pubBlock) {
       const content = pubBlock.parenContent;
 
-      const colonMatch = content.match(/^[^:]+:\s*(.+?)(?:,\s*[1-2]\d{3})$/u);
+      // Place: Publisher, Year
+      //
+      // New York: Routledge, 2018
+      const colonMatch = content.match(
+        /^[^:]+:\s*(.+?)(?:,\s*[1-2]\d{3})$/u
+      );
+
       if (colonMatch) {
         return colonMatch[1].trim();
       }
 
-      const simpleMatch = content.match(/^(.+?)\s+([1-2]\d{3})$/u);
+      // Publisher Year
+      //
+      // Oxford University Press 2015
+      const simpleMatch = content.match(
+        /^(.+?)\s+([1-2]\d{3})$/u
+      );
+
       if (simpleMatch) {
         return simpleMatch[1].trim();
       }
 
-      return content.replace(/\b[1-2]\d{3}\b/gu, '').replace(/[,:]\s*$/, '').trim();
+      // Generic fallback for parenthetical publication information.
+      return content
+        .replace(/\b[1-2]\d{3}\b/gu, '')
+        .replace(/[,:]\s*$/, '')
+        .trim();
     }
 
-    // Chicago author-date book citation:
-    // Author. Year. Title. Place: Publisher.
-    const authorDateSplit = this.splitAuthorDateCitation(cleaned);
-    if (authorDateSplit) {
-      const afterTitle = authorDateSplit.rest;
-      const pubMatch = afterTitle.match(/\.\s+([^.:]+):\s+(.+?)\.?$/u);
+
+    /*
+    * Chicago Author-Date:
+    *
+    * Dillard, Annie. 2007. The Writing Life.
+    * Pymble, NSW: HarperCollins e-books.
+    */
+    if (format === 'Chicago') {
+      const authorDateSplit =
+        this.splitAuthorDateCitation(cleaned);
+
+      if (authorDateSplit) {
+        const afterYear = authorDateSplit.rest;
+
+        /*
+        * afterYear:
+        *
+        * The Writing Life. Pymble, NSW:
+        * HarperCollins e-books.
+        */
+        const pubMatch = afterYear.match(
+          /\.\s+([^:]+):\s+(.+?)\.?$/u
+        );
+
+        if (pubMatch) {
+          return pubMatch[2]
+            .trim()
+            .replace(/\.$/, '');
+        }
+      }
+    }
+
+
+    /*
+    * Harvard:
+    *
+    * Dillard, A. (2007) The Writing Life.
+    * Pymble, NSW: HarperCollins e-books.
+    */
+    if (format === 'Harvard') {
+
+      /*
+      * Since the title may contain punctuation,
+      * use the final Place: Publisher structure
+      * rather than trying to count periods.
+      */
+      const pubMatch = cleaned.match(
+        /\.\s+([^:]+):\s+(.+?)\.?$/u
+      );
+
       if (pubMatch) {
-        return pubMatch[2].trim().replace(/\.$/, '');
+        return pubMatch[2]
+          .trim()
+          .replace(/\.$/, '');
+      }
+    }
+
+
+    /*
+    * APA 7:
+    *
+    * Dillard, A. (2007). The writing life.
+    * HarperCollins e-books.
+    *
+    * There is normally no publication place.
+    */
+    if (format === 'APA') {
+
+      /*
+      * The title has already been extracted,
+      * so use its position as the boundary
+      * between title and publisher.
+      */
+      if (title) {
+        const titleIndex = cleaned.indexOf(title);
+
+        if (titleIndex >= 0) {
+          let remainder = cleaned
+            .slice(titleIndex + title.length)
+            .trim();
+
+          /*
+          * Remove punctuation separating the
+          * title from the publisher.
+          */
+          remainder = remainder
+            .replace(/^[.\s]+/, '')
+            .replace(/\.$/, '')
+            .trim();
+
+          if (remainder) {
+            return remainder;
+          }
+        }
+      }
+
+      /*
+      * Fallback for standard APA book form:
+      *
+      * Author. (2007). Title. Publisher.
+      */
+      const apaMatch = cleaned.match(
+        /\(\d{4}\)\.\s+.+?\.\s+(.+?)\.?$/u
+      );
+
+      if (apaMatch) {
+        return apaMatch[1]
+          .trim()
+          .replace(/\.$/, '');
+      }
+    }
+
+
+    /*
+    * MLA:
+    *
+    * Dillard, Annie. The Writing Life.
+    * HarperCollins e-books, 2007.
+    */
+    if (format === 'MLA') {
+
+      /*
+      * Prefer using the already-extracted title.
+      */
+      if (title) {
+        const titleIndex = cleaned.indexOf(title);
+
+        if (titleIndex >= 0) {
+          let remainder = cleaned
+            .slice(titleIndex + title.length)
+            .trim();
+
+          remainder = remainder
+            .replace(/^[.\s]+/, '')
+            .replace(/,\s*[12]\d{3}\.?\s*$/, '')
+            .trim();
+
+          if (remainder) {
+            return remainder;
+          }
+        }
+      }
+
+      /*
+      * Fallback:
+      *
+      * Publisher, 2007.
+      */
+      const mlaMatch = cleaned.match(
+        /\.\s+([^,]+),\s*[12]\d{3}\.?\s*$/u
+      );
+
+      if (mlaMatch) {
+        return mlaMatch[1].trim();
+      }
+    }
+
+
+    /*
+    * Generic fallback:
+    *
+    * This preserves some usefulness for citations
+    * whose style could not be positively identified.
+    */
+    if (title) {
+      const titleIndex = cleaned.indexOf(title);
+
+      if (titleIndex >= 0) {
+        const remainder = cleaned
+          .slice(titleIndex + title.length)
+          .trim();
+
+        // Try Place: Publisher.
+        const placePublisherMatch = remainder.match(
+          /(?:^|\.\s+)([^:]+):\s+(.+?)\.?$/u
+        );
+
+        if (placePublisherMatch) {
+          return placePublisherMatch[2]
+            .trim()
+            .replace(/\.$/, '');
+        }
       }
     }
 
     return '';
   }
 
-  private extractPublicationPlace(raw: string): string {
-    const cleaned = this.stripTrailingCallNumber(this.cleanWhitespace(raw));
+  private extractPublicationPlace(
+    raw: string,
+    format: string
+  ): string {
 
+    const cleaned = this.stripTrailingCallNumber(
+      this.cleanWhitespace(raw)
+    );
+
+    // Preserve your older/legal citation format.
     const pubBlock = this.getPublicationBlock(cleaned);
+
     if (pubBlock) {
-      const match = pubBlock.parenContent.match(/^([^:]+):/u);
+      const match =
+        pubBlock.parenContent.match(/^([^:]+):/u);
+
       return match ? match[1].trim() : '';
     }
 
-    const authorDateSplit = this.splitAuthorDateCitation(cleaned);
-    if (authorDateSplit) {
-      const pubMatch = authorDateSplit.rest.match(/\.\s+([^.:]+):\s+(.+?)\.?$/u);
-      if (pubMatch) {
-        return pubMatch[1].trim();
+    if (format === 'Chicago') {
+      const authorDateSplit =
+        this.splitAuthorDateCitation(cleaned);
+
+      if (authorDateSplit) {
+        const pubMatch = authorDateSplit.rest.match(
+          /\.\s+([^:]+):\s+(.+?)\.?$/u
+        );
+
+        if (pubMatch) {
+          return pubMatch[1].trim();
+        }
       }
     }
 
+    if (format === 'Harvard') {
+      const match = cleaned.match(
+        /\.\s+([^:]+):\s+(.+?)\.?$/u
+      );
+
+      if (match) {
+        return match[1].trim();
+      }
+    }
+
+    // APA 7 and MLA don't normally include publication place.
     return '';
   }
 
