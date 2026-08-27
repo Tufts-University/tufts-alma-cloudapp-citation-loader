@@ -67,7 +67,7 @@
         <input matInput [(ngModel)]="block.courseNumber" required/>
       </mat-form-field>
 
-      <mat-form-field appearance="fill" class="full-width">
+      <mat-form-field *ngIf="config && config.useLegacyMapping" appearance="fill" class="full-width">
         <mat-label>Course Semester (as encoded in course name)</mat-label>
         <input matInput [(ngModel)]="block.courseSemester" />
       </mat-form-field>
