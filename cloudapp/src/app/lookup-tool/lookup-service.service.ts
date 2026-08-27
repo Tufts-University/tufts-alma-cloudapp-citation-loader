@@ -68,7 +68,7 @@ export class LookUpService {
     if (title) {
       query += `alma.title=%22*${encodeURIComponent(title)}*%22`;
     } else {
-      return this.noResultsResponse(row, 'Title');
+      return this.getNoResults(row, 'Title');
     }
 
     if (authorLast) {
@@ -189,23 +189,23 @@ export class LookUpService {
     return lookup$;
   }
 
-  private noResultsResponse(row: LookupRow, _missingField: string): Observable<any[]> {
-    const results = [{
+  private getNoResults(row: LookupRow, _missingField: string): Observable<any[]> {
+    const result:  LookupRow = {
       'Title': `No results for ${row['Title - Input'] || ''}`,
       'Author Last': `No results for ${row['Author Last - Input'] || ''}`,
       'Publisher': `No results for ${row['Publisher - Input'] || ''}`,
       'Date': `No results for ${row['Year - Input'] || ''}`,
       'course_code': row['Course Number - Input'] || '',
       'Returned Format': 'N/A'
-    }];
+    };
 
     Object.keys(row).forEach(key => {
-      if (!Object.prototype.hasOwnProperty.call(results[results.length - 1], key)) {
-        results[results.length - 1][key] = row[key];
+      if (!Object.prototype.hasOwnProperty.call(result, key)) {
+        result[key] = row[key];
       }
     });
 
-    return of(results);
+    return of([result]);
   }
 
   private parseXMLResponse(xmlResponse: string): Promise<Document> {
@@ -309,7 +309,7 @@ export class LookUpService {
 
                 const barcode = item?.item_data?.barcode || '';
 
-                if (barcode && !barcodeArray.includes(barcode)) {
+                if (barcode && barcodeArray.indexOf(barcode) === -1) {
                   barcodeArray.push(barcode);
 
                   physicalResults.push({
@@ -345,8 +345,8 @@ export class LookUpService {
     if (wantsElectronic) {
       const eMmsId = xpath('AVE', '0');
 
-      if (eMmsId && !electronicRecordArray.includes(`${eMmsId}Electronic`)) {
-        electronicRecordArray.push(`${eMmsId}Electronic`);
+      if (eMmsId && electronicRecordArray.indexOf(`${eMmsId}Electronic`) === -1) {
+        electronicRecordArray.push(`${eMmsId}Electro    nic`);
 
         const electronicResults = [{
           Title: title,
@@ -405,32 +405,33 @@ export class LookUpService {
       );
     }
 
-    const noResult = [{
+    const noResult: LookupRow = {
       Title: `No results for ${row['Title - Input'] || ''}`,
       Author: `No results for ${row['Author - Input'] || ''}`,
       'Returned Format': 'N/A'
-    }];
+    };
 
     Object.keys(row).forEach(key => {
-      if (!Object.prototype.hasOwnProperty.call(noResult[0], key)) {
-        noResult[0][key] = row[key];
+      if (!Object.prototype.hasOwnProperty.call(noResult, key)) {
+        noResult[key] = row[key];
       }
     });
 
-    return of(noResult);
+    return of([noResult]);
   }
 
   private getCourseData(row: LookupRow): Observable<CourseResult[]> {
     const effectiveSettings = this.settings;
     const useLegacyMapping = effectiveSettings.useLegacyMapping !== false;
-
+    console.log('Effective settings for course lookup:', effectiveSettings);
     const termForMapping = row['Course Term for Mapping - Input'] || '';
     const yearForMapping = row['Course Year for Mapping - Input'] || '';
     const course = row['Course Number - Input'] || '';
+    console.log('Course number for lookup:', course);
     const courseSemester = row['Course Semester - Input'] || '';
     const courseYear = row['Course Year - Input'] || '';
     const instructor = row['Instructor Last Name - Input'] || '';
-
+    console.log("Legacy mapping mode:", useLegacyMapping);
     if (!useLegacyMapping) {
       if (!termForMapping || !yearForMapping) {
         console.warn('Missing term/year mapping fields for non-legacy course search.');
@@ -446,13 +447,15 @@ export class LookUpService {
         effectiveSettings.semesterMappings?.[termForMapping as keyof typeof effectiveSettings.semesterMappings] ||
         termForMapping;
 
-      const namePattern = effectiveSettings.coursePattern || '{semester}-{course}-{year}';
+      const namePattern = effectiveSettings.coursePattern || '{semester}-{course}';
 
-      const courseName = namePattern
-        .replace('{semester}', semesterCode || '')
-        .replace('{course}', course || '')
-        .replace('{year}', yearForMapping || '');
+      let courseName;
 
+        courseName = namePattern
+          .replace('{semester}', semesterCode || '')
+          .replace('{course}', course || '')
+
+      console.log('Constructed course name for non-legacy search:', courseName);
       let courseURL = `/courses?q=name~${encodeURIComponent(courseName)}`;
 
       if (instructor) {
@@ -493,11 +496,12 @@ export class LookUpService {
       );
     }
 
-    const namePattern = effectiveSettings.coursePattern || '{semester}-{course}-{year}';
+    const namePattern = effectiveSettings.coursePattern || '{semester}-{course}';
     const legacyCourseName = namePattern
       .replace('{semester}', courseSemester || '')
       .replace('{course}', course || '')
-      .replace('{year}', courseYear || '');
+
+    console.log('Constructed legacy course name:', legacyCourseName);
 
     let courseURL = `/courses?q=name~${encodeURIComponent(legacyCourseName)}`;
 

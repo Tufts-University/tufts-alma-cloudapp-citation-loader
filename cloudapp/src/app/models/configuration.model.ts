@@ -21,7 +21,7 @@ export class Configuration {
     circArgs: { place_on_hold_shelf: boolean } = { place_on_hold_shelf: false };
 
       // ✅ Add these new properties
-  coursePattern: string = '{semester}-{course}-{year}';
+  coursePattern: string = '{semester}-{course}';
   useLegacyMapping: boolean = true;
   
   semesterMappings: {

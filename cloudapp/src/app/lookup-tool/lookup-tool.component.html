@@ -72,13 +72,19 @@
         <input matInput [(ngModel)]="block.courseSemester" />
       </mat-form-field>
 
-      <!-- <mat-form-field appearance="fill" class="full-width">
+      <!-- <mat-form-field *ngIf="config && config.useLegacyMapping" appearance="fill" class="full-width">
         <mat-label>Course Year</mat-label>
         <input matInput [(ngModel)]="block.courseYear" />
-      </mat-form-field> -->
+      </mat-form-field> 
 
+      <mat-form-field *ngIf="config && config.useLegacyMapping" appearance="fill" class="full-width">
+        <mat-label>Course Term</mat-label>
+        <input matInput [(ngModel)]="block.courseTermForMapping" />
+      </mat-form-field>
+
+       -->
       <mat-form-field *ngIf="config && !config.useLegacyMapping" appearance="fill" class="full-width">
-        <mat-label>Course Term for Mapping</mat-label>
+        <mat-label>Course Term for Mapping <br>(This could be the same as semester code)</mat-label>
         <input matInput [(ngModel)]="block.courseTermForMapping" />
       </mat-form-field>
 
